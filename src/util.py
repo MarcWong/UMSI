@@ -1,5 +1,5 @@
 from singleduration_models import sam_resnet_new, UMSI
-from losses_keras2 import loss_wrapper, kl_time, cc_time, nss_time, cc_match, kl_cc_combined
+from losses_keras2 import loss_wrapper, kl_cc_combined
 
 MODELS = {
     'sam-resnet': (sam_resnet_new, 'simple'),
@@ -7,10 +7,6 @@ MODELS = {
 }
 
 LOSSES = {
-    'kl': (kl_time, 'heatmap'),
-    'cc': (cc_time, 'heatmap'),
-    'nss': (nss_time, 'fixmap'),
-    'ccmatch': (cc_match, 'heatmap'),
     "kl+cc": (kl_cc_combined, "heatmap")
 }
 
