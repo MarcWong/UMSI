@@ -3,9 +3,7 @@ from tqdm import tqdm_notebook as tqdm
 import tqdm
 import scipy.ndimage
 import matplotlib.pyplot as plt
-#import scipy.stats
 from keras.utils import Sequence
-from eval_saliconeval import *
 
 CODECHARTS_SUB_DATASETS = ["OOC", "SALICON", "STANFORD-ACTIONS", "CAT2000", "CROWD", "LAMEM"]
 def name_to_dataset(name):
@@ -106,23 +104,6 @@ def sim_npy(gt, predicted):
     diff = np.minimum(gt, predicted)
     return np.sum(diff)
 
-def emd_npy(gt, predicted):
-    gt = (gt-np.min(gt))/(np.max(gt)-np.min(gt))
-    gt = gt/np.sum(gt)
-    predicted = (predicted-np.min(predicted))/(np.max(predicted)-np.min(predicted))
-    predicted = predicted/np.sum(predicted)
-
-    gt_flat = gt.flatten()
-    pred_flat = predicted.flatten()
-
-    return scipy.stats.wasserstein_distance(gt_flat, pred_flat)
-
-def cc_match_npy(gt, pred):
-    ccm=0
-    for t in range(len(gt)-1):
-        ccm += np.abs(np.corrcoef(gt[t].reshape(-1), gt[t+1].reshape(-1))[0,1] - np.corrcoef(pred[t].reshape(-1), pred[t+1].reshape(-1))[0,1])
-    return ccm / (len(gt)-1)
-
 def acc(gt, pred):
     return np.argmax(gt) == np.argmax(pred)
 
@@ -176,47 +157,8 @@ def predict_and_save(model, test_img, inp_size, savedir, mode='multistream_conca
             savepath = os.path.join(savedir, imname)
         hm_img.save(savepath)
 
-def predict_and_save_md(model, test_img, inp_size, savedir, mode='multistream_concat', blur=False, test_img_base_path="", times=[500, 3000, 5000], ext="png"):
-    # if test_img_base_path is specified, then preserves the original
-    # nested structure of the directory from which the stuff is pulled
-    c=0
-    if blur:
-        print('BLURRING PREDICTIONS')
-        if 'blur' not in savedir:
-            savedir = savedir+'_blur'
-    else:
-        print('NOT BLURRING PREDICTIONS')
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
-    for imfile in tqdm.tqdm(test_img):
 
-        batch = 0
-        time = 0
-        map_idx = 0
-        gt_shape = Image.open(imfile).size[::-1]
-        img = preprocess_images([imfile], inp_size[0], inp_size[1])
-        preds = model.predict(img)
-        for time, timelen in enumerate(times):
-            if mode == 'multistream_concat':
-                p = preds[time][batch][map_idx][:, :, 0]
-            elif mode == 'simple':
-                p = preds[0][batch][:,:,0]
-            elif mode == 'singlestream':
-                p = preds[0][batch][time][:,:,0]
-            else:
-                raise ValueError('Unknown mode')
-            p = postprocess_predictions(p, gt_shape[0], gt_shape[1], blur, normalize=False)
-            p_norm = (p-np.min(p))/(np.max(p)-np.min(p))
-            p_img = p_norm*255
-            hm_img = Image.fromarray(np.uint8(p_img), "L")
-
-            imname = os.path.splitext(os.path.basename(imfile))[0] + "_" + str(timelen) + "." + ext
-            savepath = os.path.join(savedir, imname)
-            hm_img.save(savepath)
-
-
-
-def calculate_metrics(p, gt_map=None, gt_fix_map=None, gt_fix_points=None, gt_labels=None, p_labels=None):
+def calculate_metrics(p, gt_map=None, gt_labels=None, p_labels=None):
     '''Calculates metrics for saliency given a SINGLE predicted map, its corresponding
     ground truth map (2D real valued np array), ground truth fixation map (2D binary np array),
     and ground truth fixation points (list of [x,y] coordinates corresponding to the fixation positions, 1 indexed)
@@ -225,8 +167,6 @@ def calculate_metrics(p, gt_map=None, gt_fix_map=None, gt_fix_points=None, gt_la
     ------
     p: real valued 2D np array. Saliency map predicted by the model.
     gt_map: real valued 2D np array. Ground truth saliency map.
-    gt_fix_map: binary 2D np array. Ground truth fixation map.
-    gt_fix_points: list of [x,y] coords. 1 indexed.
     p_labels: 1D array, predicted one-hot label vector (softmax output)
     gt_labels: 1D array, true one-hot label vector
 
@@ -245,14 +185,8 @@ def calculate_metrics(p, gt_map=None, gt_fix_map=None, gt_fix_points=None, gt_la
         metrics['R2'] = [r2(gt_map, p_norm)]
         metrics['RMSE'] = [rmse(gt_map, p_norm)]
         metrics['CC'] = [cc_npy(gt_map, p_norm)]
-        metrics['CC (saliconeval)'] = [cc_saliconeval(gt_map, p_norm)]
         metrics['KL'] = [kl_npy(gt_map, p_norm)]
         metrics['SIM'] = [sim_npy(gt_map, p_norm)]
-    if gt_fix_map is not None:
-        metrics['NSS'] = [nss_npy(gt_fix_map, p_norm)]
-    if gt_fix_points is not None:
-        metrics['NSS (saliconeval)'] = [nss_saliconeval(gt_fix_points, p_norm)]
-        metrics['AUC'] = [auc_saliconeval(gt_fix_points, p)]
     if gt_labels is not None and p_labels is not None:
         metrics['Acc'] = [acc(gt_labels, p_labels)]
         metrics['Acc_per_class'] = [acc_per_class(gt_labels, p_labels)]
@@ -260,193 +194,6 @@ def calculate_metrics(p, gt_map=None, gt_fix_map=None, gt_fix_points=None, gt_la
 
     return metrics
 
-def get_stats_multiduration(model, 
-                            gen_eval, 
-                            mode='multistream_concat', 
-                            blur=False,
-                            start_at=False, 
-                            compare_across_times=True, 
-                            n_times=3,
-                            return_top_bot_n=False, 
-                            metrics_for_top_bot_n=['CC','KL'],
-                            get_stats_per_dataset=False):
-    '''Function to calculate metrics from a multiduration model. Calculates both the average over timesteps, as well
-    as the per-timestep metrics. Can work in different modes:
-
-    singlestream: assumes that both the model and the generator output a list of k elements (one per loss), where each element
-    is a tensor of shape (bs, t, r, c, 1).
-
-    multistream_concat: assumes that the model and generator both output a list of t elements, corresponding to
-    t timesteps. Each one of those elements is a 5D tensor where the heatmap and fixation map (generator)
-    or two copies of the pred map (model) are concatenated along the second dimension,
-    resulting in a shape of (bs, 2, r, c, 1). To access the first fixmap from this 5D tensor, one would get
-    the slice: (0,1,:,:,:). This mode should be used for 3stream models in concat mode, such as simple DCNNs
-    with one output per timestep.
-    '''
-    # Setting starting point
-    if start_at:
-        gen = (next(gen_eval) for _ in range(start_at))
-    else:
-        gen = gen_eval
-
-    # set up metric tracking code
-    all_m = {}
-    m_by_time = {t: {} for t in range(n_times)}
-    m_per_dataset = {d: {} for d in CODECHARTS_SUB_DATASETS}
-    m_per_dataset_by_time = {d: {t: {} for t in range(n_times)} for d in CODECHARTS_SUB_DATASETS}
-    batch = 0
-    top_n = {}
-    bot_n = {}
-    idx = 0
-
-    # used for comparing cc across groups
-    if compare_across_times:
-        combos = {}
-        for t_lower in range(n_times):
-            for t_upper in range(t_lower +1, n_times):
-                if t_lower not in combos:
-                    combos[t_lower] = {}
-                if t_upper not in combos[t_lower]:
-                    combos[t_lower][t_upper] = []
-    
-    if isinstance(gen, Sequence):
-        gen.return_names=True
-        
-    for dat in tqdm.tqdm_notebook(gen):
-        if isinstance(gen, Sequence):
-            imgs, outs, names_batch = dat
-            
-            # Gt maps need to recover their original size
-            gt_map_batch = outs[0]
-            gt_fix_map_batch = outs[-1]
-            gt_fix_points_batch = None
-            
-        else:
-            imgs, gt_map_batch, gt_fix_map_batch, gt_fix_points_batch, name = dat
-            imgs = [imgs[0]]
-            gt_map_batch = [gt_map_batch]
-            gt_fix_map_batch = [gt_fix_map_batch]
-            gt_fix_points_batch = [gt_fix_points_batch]
-            names_batch = [name]
-            
-                        
-        pred_batch = model.predict(imgs)[0] # the model outputs 4 maps (one for each loss), we take the first one as they're all the same here
-                
-        for batch_idx, prediction in enumerate(pred_batch):
-            
-            p_t_dict = {}
-            m_t_dict = {}
-
-            for t in range(n_times):
-                if mode != 'singlestream':
-                    raise ValueError('Mode %s not implemented' % mode)
-
-                p_t = prediction[t]
-
-                gt_map_t = np.squeeze(gt_map_batch[batch_idx][t])
-                gt_fix_t = np.squeeze(gt_fix_map_batch[batch_idx][t])
-                
-                p_t = postprocess_predictions(p_t, gt_map_t.shape[0], gt_map_t.shape[1], blur, normalize=False)
-                
-                p_t_dict[t] = (p_t-np.min(p_t))/(np.max(p_t)-np.min(p_t))
-
-                gt_fix_points_t = gt_fix_points_batch[batch_idx][t] if gt_fix_points_batch else None
-                assert p_t.shape == gt_map_t.shape, "prediction and ground truth should have same dimensions, but got %s and %s" % (p_t.shape, gt_map_t.shape)
-
-                m = calculate_metrics(p_t, gt_map_t, gt_fix_t, gt_fix_points_t)
-
-
-                # If first pass, define metric dictionary as the dict returned from calculate_metrics
-                for k,v in m.items():
-                    all_m[k] = all_m.get(k, []) + v # append list to list or int to int
-                    m_by_time[t][k] = m_by_time[t].get(k, []) + v # append list to list or int to int
-                    if get_stats_per_dataset:
-                        m_per_dataset[name_to_dataset(names_batch[batch_idx])][k] = m_per_dataset[name_to_dataset(names_batch[batch_idx])].get(k, []) + v 
-                        m_per_dataset_by_time[name_to_dataset(names_batch[batch_idx])][t][k] = m_per_dataset_by_time[name_to_dataset(names_batch[batch_idx])][t].get(k, []) + v
-                        
-                m_t_dict[t] = m
-
-
-            # Calculate CC Match
-            all_m['CCM'] = all_m.get('CCM', []) + [cc_match_npy(gt_map_batch[batch_idx], prediction)]
-
-            # calculate pairwise
-            if compare_across_times:
-                for t_lower, others in combos.items():
-                    for t_higher in others.keys():
-                        combos[t_lower][t_higher].append(cc_npy(p_t_dict[t_lower], p_t_dict[t_higher]))
-
-    if return_top_bot_n:
-        for me in metrics_for_top_bot_n:
-            if me not in top_n:
-                top_n[me] = []
-            if len(top_n.get(me,[])) < return_top_bot_n:
-                item = (np.mean(all_m[me][-n_times:]), idx, mt, imgs[0], hms_by_time, gt_map_batch, [combos[0][1][-1],combos[0][2][-1],combos[1][2][-1]] )
-                top_n[me].append(item)
-                cur_min_idx = np.argmin([it[0] for it in top_n[me]])
-            elif np.mean(all_m[me][-n_times:]) > top_n[me][cur_min_idx][0]:
-                del top_n[me][cur_min_idx]
-                item = (np.mean(all_m[me][-n_times:]), idx, mt, imgs[0], hms_by_time, gt_map_batch, [combos[0][1][-1],combos[0][2][-1],combos[1][2][-1]])
-                top_n[me].append(item)
-                cur_min_idx = np.argmin([it[0] for it in top_n[me]])
-            if me not in bot_n:
-                bot_n[me] = []
-            if len(bot_n.get(me,[])) < return_top_bot_n:
-                item = (np.mean(all_m[me][-n_times:]), idx, mt, imgs[0], hms_by_time, gt_map_batch, [combos[0][1][-1],combos[0][2][-1],combos[1][2][-1]])
-                bot_n[me].append(item)
-                cur_max_idx = np.argmax([it[0] for it in bot_n[me]])
-            elif np.mean(all_m[me][-n_times:]) < bot_n[me][cur_max_idx][0]:
-                del bot_n[me][cur_max_idx]
-                item = (np.mean(all_m[me][-n_times:]), idx, mt, imgs[0], hms_by_time, gt_map_batch, [combos[0][1][-1],combos[0][2][-1],combos[1][2][-1]])
-                bot_n[me].append(item)
-                cur_max_idx = np.argmax([it[0] for it in bot_n[me]])
-            idx+=1
-
-
-
-    print("Overall metrics:")
-    for k,v in all_m.items():
-        print("\t", k,':', np.mean(v))
-
-    print()
-    print("Metrics by time:")
-    for t, m in m_by_time.items():
-        print("\tTime %d" % t)
-        for k, v in m.items():
-            print("\t\t", k, ":", np.mean(v))
-
-    print()
-    if compare_across_times:
-        print("CC across time groups:")
-        for t_lower, others in combos.items():
-            for t_higher, v in others.items():
-                print("CC for times %d and %d" % (t_lower, t_higher), np.mean(v))
-    
-    if get_stats_per_dataset:
-        print()
-        print("Metrics per dataset:")
-        for d in CODECHARTS_SUB_DATASETS:
-            print("Dataset %s" % d)
-            for k,v in m_per_dataset[d].items():
-                print("\t", k,':', np.mean(v))
-                
-            for t, m in m_per_dataset_by_time[d].items():
-                print("\tTime %d" % t)
-                for k, v in m.items():
-                    print("\t\t", k, ":", np.mean(v))
-
-    if not return_top_bot_n and not get_stats_per_dataset:
-        return all_m, m_by_time, combos
-    
-    if return_top_bot_n and get_stats_per_dataset:
-        return all_m, m_by_time, combos, m_per_dataset, m_per_dataset_by_time, top_n, bot_n
-    elif get_stats_per_dataset:
-        return all_m, m_by_time, combos, m_per_dataset, m_per_dataset_by_time
-    elif return_top_bot_n:
-        return all_m, m_by_time, combos, top_n, bot_n
-    else:
-        return all_m, m_by_time, combos
-        
 
 def get_stats_oneduration(model, 
                           gen_eval, 
