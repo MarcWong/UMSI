@@ -1,13 +1,7 @@
-from multiduration_models import md_sem, xception_se_lstm, sam_resnet_3d, xception_3d, xception_se_lstm_nodecoder
 from singleduration_models import sam_resnet_new, UMSI
 from losses_keras2 import loss_wrapper, kl_time, cc_time, nss_time, cc_match, kl_cc_combined
 
 MODELS = {
-    'md_sem': (md_sem, 'singlestream'),
-    'xception_se_lstm': (xception_se_lstm, 'singlestream'),
-    'xception_3d': (xception_3d, 'singlestream'),
-    'xception_se_lstm_nodecoder': (xception_se_lstm_nodecoder, 'singlestram'),
-    'sam_resnet_3d': (sam_resnet_3d, 'singlestream'),
     'sam-resnet': (sam_resnet_new, 'simple'),
     "UMSI": (UMSI, "simple")
 }
