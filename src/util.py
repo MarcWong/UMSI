@@ -1,8 +1,7 @@
-from singleduration_models import sam_resnet_new, UMSI
+from singleduration_models import UMSI
 from losses_keras2 import loss_wrapper, kl_cc_combined
 
 MODELS = {
-    'sam-resnet': (sam_resnet_new, 'simple'),
     "UMSI": (UMSI, "simple")
 }
 

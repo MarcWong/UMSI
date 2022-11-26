@@ -1,21 +1,14 @@
 import numpy as np
 import keras
-import sys
-import os
 from keras.layers import Layer, Input, Multiply, Dropout, TimeDistributed, LSTM, Activation, Lambda, Conv2D, Dense, GlobalAveragePooling2D, MaxPooling2D, ZeroPadding2D, UpSampling2D, BatchNormalization, Concatenate, Add, DepthwiseConv2D
 import keras.backend as K
 from keras.models import Model
 import tensorflow as tf
-from keras.utils import Sequence
-import cv2
-import scipy.io
-import math
 from attentive_convlstm_new import AttentiveConvLSTM2D
 from dcn_resnet_new import dcn_resnet
 from gaussian_prior_new import LearningPrior
 from sal_imp_utilities import *
 from xception_custom import Xception_wrapper
-#from keras.applications import keras_modules_injection
 from keras.regularizers import l2
 
 
@@ -232,281 +225,6 @@ def fcn_vgg16(input_shape=(shape_r, shape_c, 3),
 
     return model
 
-############# SAM BASED MODELS ###############
-
-def sam_simple(input_shape = (224, 224, 3), in_conv_filters=512,
-               verbose=True, print_shapes=True, n_outs=1, ups=8):
-    '''Simple network that uses an attentive convlstm and a few convolutions.'''
-
-    inp = Input(shape=input_shape)
-
-    x = Conv2D(filters=in_conv_filters, kernel_size=(3,3), strides=(2, 2), padding='same', data_format=None, dilation_rate=(1,1))(inp)
-    if print_shapes:
-        print('after first conv')
-
-    x = MaxPooling2D(pool_size=(4,4))(x)
-    if print_shapes:
-        print('after maxpool',x.shape)
-
-    x = Lambda(repeat, repeat_shape)(x)
-    if print_shapes:
-        print('after repeat',x.shape)
-
-    x = AttentiveConvLSTM2D(filters=512, attentive_filters=512, kernel_size=(3,3),
-                            attentive_kernel_size=(3,3), padding='same', return_sequences=False)(x)
-    if print_shapes:
-        print('after ACLSTM',x.shape)
-
-
-    x = UpSampling2D(size=(ups,ups), interpolation='bilinear')(x)
-
-    outs_up = Conv2D(filters=1, kernel_size=(3,3), strides=(1, 1), padding='same', data_format=None, dilation_rate=(1,1))(x)
-    if print_shapes:
-        print('output shape',outs_up.shape)
-
-
-    outs_final = [outs_up]*n_outs
-
-    att_convlstm = Model(inputs=inp, outputs=outs_final)
-    if verbose:
-        att_convlstm.summary()
-
-    return att_convlstm
-
-
-def sam_resnet_nopriors(input_shape = (224, 224, 3), conv_filters=128, lstm_filters=512,
-                        att_filters=512, verbose=True, print_shapes=True, n_outs=1, ups=8):
-    '''Sam ResNet with no priors.'''
-
-    inp = Input(shape=input_shape)
-
-    dcn = dcn_resnet(input_tensor=inp)
-    conv_feat = Conv2D(conv_filters, 3, padding='same', activation='relu')(dcn.output)
-    if print_shapes:
-        print('Shape after first conv after dcn_resnet:',conv_feat.shape)
-
-    # Attentive ConvLSTM
-    att_convlstm = Lambda(repeat, repeat_shape)(conv_feat)
-    att_convlstm = AttentiveConvLSTM2D(filters=lstm_filters, attentive_filters=att_filters, kernel_size=(3,3),
-                            attentive_kernel_size=(3,3), padding='same', return_sequences=False)(att_convlstm)
-
-    # Dilated convolutions (priors would go here)
-    dil_conv1 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(att_convlstm)
-    dil_conv2 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(dil_conv1)
-
-    # Final conv to get to a heatmap
-    outs = Conv2D(1, kernel_size=1, padding='same', activation='relu')(dil_conv2)
-    if print_shapes:
-        print('Shape after 1x1 conv:',outs.shape)
-
-    # Upsampling back to input shape
-    outs_up = UpSampling2D(size=(ups,ups), interpolation='bilinear')(outs)
-    if print_shapes:
-        print('shape after upsampling',outs_up.shape)
-
-
-    outs_final = [outs_up]*n_outs
-
-
-    # Building model
-    m = Model(inp, outs_final)
-    if verbose:
-        m.summary()
-
-    return m
-
-
-def sam_resnet_new(input_shape = (shape_r, shape_c, 3),
-                   conv_filters=512, 
-                   lstm_filters=512, 
-                   att_filters=512,
-                   verbose=True, 
-                   print_shapes=True, 
-                   n_outs=1, 
-                   ups=8, 
-                   nb_gaussian=nb_gaussian):
-    '''SAM-ResNet ported from the original code.'''
-
-    inp = Input(shape=input_shape)
-
-    dcn = dcn_resnet(input_tensor=inp)
-    conv_feat = Conv2D(conv_filters, 3, padding='same', activation='relu')(dcn.output)
-    if print_shapes:
-        print('Shape after first conv after dcn_resnet:',conv_feat.shape)
-
-    # Attentive ConvLSTM
-    att_convlstm = Lambda(repeat, repeat_shape)(conv_feat)
-    att_convlstm = AttentiveConvLSTM2D(filters=lstm_filters, 
-                                       attentive_filters=att_filters, 
-                                       kernel_size=(3,3),
-                                       attentive_kernel_size=(3,3), 
-                                       padding='same', 
-                                       return_sequences=False)(att_convlstm)
-
-    # Learned Prior (1)
-    priors1 = LearningPrior(nb_gaussian=nb_gaussian)(att_convlstm)
-    concat1 = Concatenate(axis=-1)([att_convlstm, priors1])
-    dil_conv1 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(concat1)
-
-    # Learned Prior (2)
-    priors2 = LearningPrior(nb_gaussian=nb_gaussian)(att_convlstm)
-    concat2 = Concatenate(axis=-1)([dil_conv1, priors2])
-    dil_conv2 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(concat2)
-
-    # Final conv to get to a heatmap
-    outs = Conv2D(1, kernel_size=1, padding='same', activation='relu')(dil_conv2)
-    if print_shapes:
-        print('Shape after 1x1 conv:',outs.shape)
-
-    # Upsampling back to input shape
-    outs_up = UpSampling2D(size=(ups,ups), interpolation='bilinear')(outs)
-    if print_shapes:
-        print('shape after upsampling',outs_up.shape)
-
-
-    outs_final = [outs_up]*n_outs
-
-
-    # Building model
-    m = Model(inp, outs_final)
-    if verbose:
-        m.summary()
-
-    return m
-
-def sam_xception_new(input_shape = (shape_r, shape_c, 3), conv_filters=512, lstm_filters=512, att_filters=512,
-                   verbose=True, print_shapes=True, n_outs=1, ups=8, nb_gaussian=nb_gaussian):
-    '''SAM with a custom Xception as encoder.'''
-
-    inp = Input(shape=input_shape)
-
-    from xception_custom import Xception
-    from keras.applications import keras_modules_injection
-    #@keras_modules_injection
-    def Xception_wrapper(*args, **kwargs):
-        return Xception(*args, **kwargs)
-
-    inp = Input(shape = input_shape)
-    dcn = Xception_wrapper(include_top=False, weights='imagenet', input_tensor=inp, pooling=None)
-    if print_shapes: print('xception:',dcn.output.shape)
-
-    conv_feat = Conv2D(conv_filters, 3, padding='same', activation='relu')(dcn.output)
-    if print_shapes:
-        print('Shape after first conv after dcn_resnet:',conv_feat.shape)
-
-    # Attentive ConvLSTM
-    att_convlstm = Lambda(repeat, repeat_shape)(conv_feat)
-    att_convlstm = AttentiveConvLSTM2D(filters=lstm_filters, attentive_filters=att_filters, kernel_size=(3,3),
-                            attentive_kernel_size=(3,3), padding='same', return_sequences=False)(att_convlstm)
-
-    # Learned Prior (1)
-    priors1 = LearningPrior(nb_gaussian=nb_gaussian)(att_convlstm)
-    concat1 = Concatenate(axis=-1)([att_convlstm, priors1])
-    dil_conv1 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(concat1)
-
-    # Learned Prior (2)
-    priors2 = LearningPrior(nb_gaussian=nb_gaussian)(att_convlstm)
-    concat2 = Concatenate(axis=-1)([dil_conv1, priors2])
-    dil_conv2 = Conv2D(conv_filters, 5, padding='same', activation='relu', dilation_rate=(4, 4))(concat2)
-
-    # Final conv to get to a heatmap
-    outs = Conv2D(1, kernel_size=1, padding='same', activation='relu')(dil_conv2)
-    if print_shapes:
-        print('Shape after 1x1 conv:',outs.shape)
-
-    # Upsampling back to input shape
-    outs_up = UpSampling2D(size=(ups,ups), interpolation='bilinear')(outs)
-    if print_shapes:
-        print('shape after upsampling',outs_up.shape)
-
-
-    outs_final = [outs_up]*n_outs
-
-
-    # Building model
-    m = Model(inp, outs_final)
-    if verbose:
-        m.summary()
-
-    return m
-
-
-
-def xception_se_lstm_singledur(input_shape = (shape_r, shape_c, 3),
-                     conv_filters=256,
-                     lstm_filters=512,
-                     verbose=True,
-                     print_shapes=True,
-                     n_outs=1,
-                     ups=8,
-                     freeze_enc=False,
-                     return_sequences=False):
-    inp = Input(shape = input_shape)
-
-    ### ENCODER ###
-    xception = Xception_wrapper(include_top=False, weights='imagenet', input_tensor=inp, pooling=None)
-    if print_shapes: print('xception output shapes:',xception.output.shape)
-    if freeze_enc:
-        for layer in xception.layers:
-	        layer.trainable = False
-
-    ### LSTM over SE representation ###
-    x = se_lstm_block(xception.output, nb_timestep, lstm_filters=lstm_filters, return_sequences=return_sequences)
-
-    ### DECODER ###
-    outs_dec = decoder_block(x, dil_rate=(2,2), print_shapes=print_shapes, dec_filt=conv_filters)
-
-    outs_final = [outs_dec]*n_outs
-    m = Model(inp, outs_final)
-    if verbose:
-        m.summary()
-    return m
-
-def se_lstm_block(inp, nb_timestep, units=512, print_shapes=True, lstm_filters=512, return_sequences=False):
-
-    inp_rep = Lambda(lambda y: K.repeat_elements(K.expand_dims(y, axis=1), nb_timestep, axis=1),
-                     lambda s: (s[0], nb_timestep) + s[1:])(inp)
-    x = TimeDistributed(GlobalAveragePooling2D())(inp_rep)
-    if print_shapes: print('shape after AvgPool',x.shape)
-    x = TimeDistributed(Dense(units, activation='relu'))(x)
-    if print_shapes: print('shape after first dense',x.shape)
-
-    # Normally se block would feed into another fully connected. Instead, we feed it to an LSTM.
-    x = LSTM(lstm_filters, return_sequences=return_sequences, unroll=True, activation='relu')(x)
-    if print_shapes: print('shape after lstm',x.shape)
-
-    x = Dense(inp.shape[-1].value, activation='sigmoid')(x)
-    if print_shapes: print('shape after second dense:', x.shape)
-
-    x = Lambda(lambda y: K.expand_dims(K.expand_dims(y, axis=1),axis=1),
-                lambda s: (s[0], 1, 1, s[-1]))(x)
-    if print_shapes: print('shape before mult',x.shape)
-
-    out = Multiply()([x,inp])
-
-    print('shape out',out.shape)
-    # out is (bs, r, c, 2048)
-
-    return out
-
-
-def xception_aspp(input_shape = (shape_r, shape_c, 3),
-                 conv_filters=256,
-                 lstm_filters=512,
-                 verbose=True,
-                 print_shapes=True,
-                 n_outs=1,
-                 ups=8,
-                 freeze_enc=False,
-                 return_sequences=False):
-
-    # Xception
-
-    # Conv1,2,ASPP
-    dil_conv1 = Conv2D(conv_filters, 3, padding='same', activation='relu', dilation_rate=(2, 2))(x)
-    dil_conv2 = Conv2D(conv_filters, 3, padding='same', activation='relu', dilation_rate=(4, 4))(x)
-    dil_conv3 = Conv2D(conv_filters, 3, padding='same', activation='relu', dilation_rate=(8, 8))(x)
-    pass
 
 ############# UMSI MODELS ###############
 
@@ -526,47 +244,49 @@ def UMSI(input_shape = (shape_r, shape_c, 3),
     if freeze_enc:
         for layer in xception.layers:
 	        layer.trainable = False
-        #ASPP
-    c0 = Conv2D(256,(1,1),padding="same",use_bias=False,name = "aspp_csep0")(xception.output)
-    c6 = DepthwiseConv2D((3,3),dilation_rate=(6,6),padding="same",use_bias=False,name="aspp_csepd6_depthwise")(xception.output)
-    c12 = DepthwiseConv2D((3,3),dilation_rate=(12,12),padding="same",use_bias=False,name="aspp_csepd12_depthwise")(xception.output)
-    c18 = DepthwiseConv2D((3,3),dilation_rate=(18,18),padding="same",use_bias=False,name="aspp_csepd18_depthwise")(xception.output)
+    
+    # ASPP
+    # TODO: Fill the missing parameters in
+    c0 = Conv2D(name = "aspp_csep0")(xception.output)
+    c6 = DepthwiseConv2D(name="aspp_csepd6_depthwise")(xception.output)
+    c12 = DepthwiseConv2D(name="aspp_csepd12_depthwise")(xception.output)
+    c18 = DepthwiseConv2D(name="aspp_csepd18_depthwise")(xception.output)
 
     
     c6 = BatchNormalization(name="aspp_csepd6_depthwise_BN")(c6)
     c12 = BatchNormalization(name="aspp_csepd12_depthwise_BN")(c12)
     c18 = BatchNormalization(name="aspp_csepd18_depthwise_BN")(c18)
-    c6 = Activation("relu", name = "activation_2")(c6)
-    c12 = Activation("relu", name = "activation_4")(c12)
-    c18 = Activation("relu", name = "activation_6")(c18)
-    c6 =  Conv2D(256,(1,1),padding="same",use_bias=False,name = "aspp_csepd6_pointwise")(c6)
-    c12 =  Conv2D(256,(1,1),padding="same",use_bias=False,name = "aspp_csepd12_pointwise")(c12)
-    c18 =  Conv2D(256,(1,1),padding="same",use_bias=False,name = "aspp_csepd18_pointwise")(c18)
+    c6 = Activation(name = "activation_2")(c6)
+    c12 = Activation(name = "activation_4")(c12)
+    c18 = Activation(name = "activation_6")(c18)
+    c6 = Conv2D(name = "aspp_csepd6_pointwise")(c6)
+    c12 = Conv2D(name = "aspp_csepd12_pointwise")(c12)
+    c18 = Conv2D(name = "aspp_csepd18_pointwise")(c18)
 
     c0 = BatchNormalization(name='aspp0_BN')(c0)
     c6 = BatchNormalization(name='aspp_csepd6_pointwise_BN')(c6)
     c12 = BatchNormalization(name='aspp_csepd12_pointwise_BN')(c12)
     c18 = BatchNormalization(name='aspp_csepd18_pointwise_BN')(c18)
 
-    c0 = Activation("relu", name = "aspp0_activation")(c0)
-    c6 = Activation("relu", name = "activation_3")(c6)
-    c12 = Activation("relu", name = "activation_5")(c12)
-    c18 = Activation("relu", name = "activation_7")(c18)
+    c0 = Activation(name = "aspp0_activation")(c0)
+    c6 = Activation(name = "activation_3")(c6)
+    c12 = Activation(name = "activation_5")(c12)
+    c18 = Activation(name = "activation_7")(c18)
 
     concat1 = Concatenate(name="concatenate_1")([c0,c6,c12,c18])
 
-        ### classification module ###
-    x = Conv2D(256, (3,3), strides = (3,3), padding="same",use_bias=False,name = "global_conv")(xception.output)
-    x = BatchNormalization(name="global_BN")(x)
-    x = Activation("relu", name = "activation_1")(x)
-    x = Dropout(.3, name="dropout_1")(x)
-    x = GlobalAveragePooling2D(name = "global_average_pooling2d_1")(x)
-    x = Dense(256, name="global_dense")(x)
-    classif = Dropout(.3, name="dropout_2")(x)
+
+    ### classification module ###
+    # TODO: Fill the missing layers in
+    classif = some_functions(xception.output)
+
+
     out_classif = Dense(6, activation="softmax", name="out_classif")(classif)
 
 
     x = Dense(256, name="dense_fusion")(classif)
+
+
     def lambda_layer_function(x):
         x = tf.reshape(x,(tf.shape(x)[0],1,1,256))
         con = [x for i in range(30)]
