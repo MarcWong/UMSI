@@ -24,39 +24,6 @@ def name_to_dataset(name):
     return d
 
 
-def visualize_samples(model, gen, times):
-    images, maps = gen.__getitem__(np.random.randint(len(gen_val)))
-
-    preds = model.predict(images)
-
-    times = [500, 3000, 5000]
-    n_times = len(preds)
-    assert len(times) == n_times
-    batch_sz = len(preds[0])
-    copy=0
-
-    for batch in range(batch_sz):
-        plt.imshow(reverse_preprocess(images[batch]))
-        plt.title("original image %d" % batch)
-        plt.show()
-
-        plt.figure(figsize=[16, 10])
-        n_row=n_times
-        n_col=2
-
-        for time in range(n_times):
-
-            plt.subplot(n_row,n_col,time*n_col+1)
-            plt.imshow(maps[time][batch][copy][:, :, 0])
-            plt.title('Gt %dms' % times[time])
-
-            plt.subplot(n_row,n_col,time*n_col+2)
-            plt.imshow(preds[time][batch][copy][:, :, 0])
-            plt.title('Prediction %dms' % times[time])
-
-        plt.show()
-
-
 def rmse(gr_truth, predicted):
     errors = gr_truth - predicted
     errors = errors**2
