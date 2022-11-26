@@ -4,7 +4,6 @@ from keras.layers import Layer, Input, Multiply, Dropout, TimeDistributed, LSTM,
 import keras.backend as K
 from keras.models import Model
 import tensorflow as tf
-from attentive_convlstm_new import AttentiveConvLSTM2D
 from dcn_resnet_new import dcn_resnet
 from gaussian_prior_new import LearningPrior
 from sal_imp_utilities import *
