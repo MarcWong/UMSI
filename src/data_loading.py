@@ -32,13 +32,13 @@ def load_datasets_singleduration(dataset, bp='/path/to/your/datasets', return_te
         uses_fix=False
         has_classes = True
 
-        img_path_train = os.path.join(bp, 'Salicon', 'images', 'train')
-        imp_path_train = os.path.join(bp, 'Salicon', 'maps', 'train')
+        img_path_train = os.path.join(bp, 'Salicon', 'train')
+        imp_path_train = os.path.join(bp, 'Salicon', 'train_maps')
 
-        img_path_val = os.path.join(bp, 'Salicon', 'images', "val")
-        imp_path_val = os.path.join(bp, 'Salicon', 'maps', 'val')
+        img_path_val = os.path.join(bp, 'Salicon', 'val')
+        imp_path_val = os.path.join(bp, 'Salicon', 'val_maps')
 
-        img_path_test = os.path.join(bp, 'Salicon','images', 'test')
+        img_path_test = os.path.join(bp, 'Salicon', 'test')
 
         img_filenames_train = sorted([os.path.join(img_path_train, f) for f in os.listdir(img_path_train)])
         imp_filenames_train = sorted([os.path.join(imp_path_train, f) for f in os.listdir(imp_path_train)])
@@ -74,7 +74,7 @@ def load_datasets_singleduration(dataset, bp='/path/to/your/datasets', return_te
         img_filenames_val = np.array([])
         imp_filenames_val = np.array([])
 
-        use_tts_file=True
+        use_tts_file = False
 
         if not use_tts_file:
             for f in os.listdir(img_path):
@@ -109,6 +109,27 @@ def load_datasets_singleduration(dataset, bp='/path/to/your/datasets', return_te
         # Dummy variables
         fix_filenames_train = None #np.array(['dummy']*len(img_filenames_train))
         fix_filenames_val = None #np.array(['dummy']*len(img_filenames_val))
+
+    elif dataset == 'SalChartQA':
+        print('Using SalChartQA')
+
+        uses_fix =False
+        has_classes = False
+
+        img_path_train = os.path.join(bp,'SalChartQA-MD/train/raw_img')
+        imp_path_train = os.path.join(bp,'SalChartQA-MD/train/heatmaps_accum/10000')
+        img_path_val = os.path.join(bp,'SalChartQA-MD/val/raw_img')
+        imp_path_val = os.path.join(bp,'SalChartQA-MD/val/heatmaps_accum/10000')
+
+        img_filenames_train = sorted([os.path.join(img_path_train, f) for f in os.listdir(img_path_train)])
+        imp_filenames_train = sorted([os.path.join(imp_path_train, f) for f in os.listdir(imp_path_train)])
+        img_filenames_val = sorted([os.path.join(img_path_val, f) for f in os.listdir(img_path_val)])
+        imp_filenames_val = sorted([os.path.join(imp_path_val, f) for f in os.listdir(imp_path_val)])
+
+        # Dummy variables
+        fix_filenames_train = None #np.array([])
+        fix_filenames_val = None #np.array([])
+
 
 
     print('Length of loaded files:')

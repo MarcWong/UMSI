@@ -43,15 +43,15 @@ class InteractivePlot(keras.callbacks.Callback):
 
       self.icount+=1
       clear_output(wait=True)
-      plt.figure(figsize=(14,10))
+      #plt.figure(figsize=(14,10))
       train_vals = [self.losses]
       desc = ['loss']
-      for i in range(len(train_vals)):
+      #for i in range(len(train_vals)):
           #plt.subplot(2, 3, i+1)
-          plt.plot(range(self.icount), train_vals[i], label=desc[i])
-          plt.legend()
+      #    plt.plot(range(self.icount), train_vals[i], label=desc[i])
+      #    plt.legend()
       #plt.savefig(self.logfile.replace('.txt', '.png'), bbox_inches='tight', format='png')
-      plt.show()
+      #plt.show()
 
   def on_batch_end(self, batch, logs=None):
       self.batchnr+=1

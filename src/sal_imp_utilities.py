@@ -694,8 +694,6 @@ def eval_generator(
 
 
 
-
-
 def get_str2label(dataset_path, label_mapping_file=None):
     str2label={}
     if label_mapping_file:
@@ -711,23 +709,28 @@ def get_str2label(dataset_path, label_mapping_file=None):
     return str2label
 
 def get_labels(filenames, str2label=None):
+    base_path = '/projects/wang/datasets/'
 
     if not str2label:
-        str2label = get_str2label(dataset_path = '/netpool/homes/wangyo/Dataset/imp1k/imgs', label_mapping_file = "/netpool/homes/wangyo/Dataset/imp1k/imp1k_with_nat_images_label_map.txt")
+        str2label = get_str2label(dataset_path = base_path +'imp1k/imgs', label_mapping_file = base_path + "imp1k/imp1k_with_nat_images_label_map.txt")
 
     onehot_arr = np.zeros((len(filenames), len(str2label)))
-#     print('filenames in get labels',filenames)
 
     for i,f in enumerate(filenames):
         split = re.split('/|\\\\',f)
         class_name = split[-2]
-        if split[-4] == 'Salicon':
-            label = str2label['natural_images']
-            onehot_arr[i, label] = 1
-        else:
-    #         print('CLASS NAME IN GET_LABELS', class_name)
-            label = str2label[class_name]
-            onehot_arr[i, label] = 1
+        for spl in split:
+            if 'Salicon' in spl:
+                label = str2label['natural_images']
+                onehot_arr[i, label] = 1
+            elif 'SalChartQA' in spl:
+                label = str2label['infographics']
+                onehot_arr[i, label] = 1
+            else:
+                # print('CLASS NAME IN GET_LABELS', class_name)
+                #label = str2label[class_name]
+                label = str2label['infographics']
+                onehot_arr[i, label] = 1
     return onehot_arr
 
 
