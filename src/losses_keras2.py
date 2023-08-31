@@ -17,14 +17,15 @@ def correlation_coefficient(y_true, y_pred):
     y_true /= (sum_y_true + K.epsilon())
     y_pred /= (sum_y_pred + K.epsilon())
 
-    # TODO: Fill the CC loss here
     N = shape_r_out * shape_c_out
-    sum_xy =
-    sum_x =
-    sum_y =
+    sum_prod = K.sum(K.sum(y_true * y_pred, axis=1), axis=1)
+    sum_x = K.sum(K.sum(y_true, axis=1), axis=1)
+    sum_y = K.sum(K.sum(y_pred, axis=1), axis=1)
+    sum_x_square = K.sum(K.sum(K.square(y_true), axis=1), axis=1)
+    sum_y_square = K.sum(K.sum(K.square(y_pred), axis=1), axis=1)
 
-    num =
-    den =
+    num = sum_prod - ((sum_x * sum_y) / N)
+    den = K.sqrt((sum_x_square - K.square(sum_x) / N) * (sum_y_square - K.square(sum_y) / N))
 
     return num / den
 
